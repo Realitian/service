@@ -17,9 +17,7 @@ int main(int argc, char *argv[])
         command = argv[3];
     }
 
-    boost::asio::io_service io_service;
-    server s(io_service, 10000);
-    io_service.run();
+    start();
 
     return 0;
 }

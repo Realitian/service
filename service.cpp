@@ -19,12 +19,29 @@ void exec_python();
 
 using boost::asio::ip::tcp;
 
-session::session(tcp::socket socket)
-    : socket_(std::move(socket))
+boost::asio::io_service io_service;
+tcp::socket socket_(io_service);
+
+void accep_handler( const boost::system::error_code &ec );
+void do_process( );
+
+void start()
 {
+    tcp::acceptor acceptor_(io_service, tcp::endpoint(tcp::v4(), 10000));
+    acceptor_.async_accept(socket_, accep_handler);
+    io_service.run();
 }
 
-void session::start()
+void accep_handler(const boost::system::error_code &ec)
+{
+    if (ec)
+        return;
+
+    while(1)
+        do_process();
+}
+
+void do_process()
 {
     int compressedBytes = 640*480*3;
     char* compressedData = new char[compressedBytes];
