@@ -3,7 +3,7 @@ project (Service)
 
 set (CMAKE_CXX_STANDARD 11)
 
-add_executable (Service main.cpp service.cpp ZlibUtil.cpp)
+add_executable (Service service.cpp ZlibUtil.cpp)
 
 # Indicate which libraries to include during the link process.
 
