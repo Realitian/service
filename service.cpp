@@ -19,83 +19,96 @@ void exec_python();
 
 using boost::asio::ip::tcp;
 
-boost::asio::io_service io_service;
-tcp::socket socket_(io_service);
+int main(int argc, char *argv[])
+{
+    if ( argc > 2 )
+    {
+        inputPath = argv[1];
+        outputPath = argv[2];
+    }
 
-void accep_handler( const boost::system::error_code &ec );
-void do_process( );
+    if ( argc > 3 )
+    {
+        command = argv[3];
+    }
+
+    try
+    {
+        start();
+    }
+    catch (std::exception& e)
+    {
+        std::cerr << e.what() << std::endl;
+    }
+
+    return 0;
+}
 
 void start()
 {
-    tcp::acceptor acceptor_(io_service, tcp::endpoint(tcp::v4(), 10000));
-    acceptor_.async_accept(socket_, accep_handler);
-    io_service.run();
-}
+    boost::asio::io_service io_service;
+    tcp::endpoint endpoint(tcp::v4(), 10000);
+    tcp::acceptor acceptor(io_service, endpoint);
 
-void accep_handler(const boost::system::error_code &ec)
-{
-    if (ec)
-        return;
+    while(true){
+        tcp::socket socket(io_service);
+        acceptor.accept(socket);
 
-    while(1)
-        do_process();
-}
+        int compressedBytes = 0;
+        socket.read_some(boost::asio::buffer(&compressedBytes, sizeof(int)));
 
-void do_process()
-{
-    int compressedBytes = 640*480*3;
-    char* compressedData = new char[compressedBytes];
-    int readBufferSize = 0;
-    size_t rb = socket_.read_some(boost::asio::buffer(compressedData, compressedBytes));
-    readBufferSize += rb;
-    std::cout << "log point 1 " << rb << std::endl;
-//    while( rb )
-//    {
-//        rb = socket_.read_some(boost::asio::buffer(compressedData+rb, 1024));
-//        readBufferSize += rb;
-//        std::cout << "log point 1 : " << readBufferSize << std::endl;
-//    }
+        char* compressedData = new char[compressedBytes];
 
-    std::cout << "log point 2 " << std::endl;
+        int readBufferSize = 0;
+        int buffer_size = 1024*1024;
 
-    int imageBytes = 640*480*3;
-    char* imageData = new char[imageBytes];
-    int originSz = uncompressData(compressedData, readBufferSize, imageData, imageBytes);
+        while( readBufferSize < compressedBytes )
+        {
+            boost::system::error_code error;
 
-    std::cout << "uncompressed recv size : " << originSz << std::endl;
+            int len = socket.read_some(boost::asio::buffer(compressedData+readBufferSize, buffer_size), error);
 
-    int type = ((int*)imageData)[0];
-    int rows = ((int*)imageData)[1];
-    int cols = ((int*)imageData)[2];
-    char* data = (char*)((void*)imageData + sizeof(int)*3);
+            if ( error == boost::asio::error::eof )
+                break;
+            else if ( error )
+                throw boost::system::system_error(error);
 
-    cv::Mat inpuImage(rows, cols, type, data);
+            readBufferSize += len;
+        }
 
-    std::cout << "input image : " << rows << ", " << cols << ", " << type << std::endl;
-    cv::imwrite(inputPath, inpuImage);
+        int imageBytes = 640*480*3;
+        char* imageData = new char[imageBytes];
+        uncompressData(compressedData, readBufferSize, imageData, imageBytes);
 
-    std::cout << "log point 3 " << std::endl;
-    exec_python();
-    std::cout << "log point 4 " << std::endl;
+        int type = ((int*)imageData)[0];
+        int rows = ((int*)imageData)[1];
+        int cols = ((int*)imageData)[2];
+        char* data = (char*)((void*)imageData + sizeof(int)*3);
 
-    cv::Mat outputImage = cv::imread(outputPath);
-    type  = outputImage.type();
-    rows = outputImage.rows;
-    cols = outputImage.cols;
+        cv::Mat inpuImage(rows, cols, type, data);
 
-    int outputBytes = outputImage.total() * outputImage.elemSize();
-    char* outputData = new char[outputBytes+sizeof(int)*3];
-    memcpy( (void*)outputData, &type, sizeof(int) );
-    memcpy( (void*)outputData + sizeof(int), &rows, sizeof(int) );
-    memcpy( (void*)outputData + sizeof(int)*2, &cols, sizeof(int) );
-    memcpy( (void*)outputData + sizeof(int)*3, outputImage.data, outputBytes );
+        cv::imwrite(inputPath, inpuImage);
 
-    uint8_t * compressedBuffer = new uint8_t[outputBytes];
-    int compressedLength = compressData(outputData, outputBytes+sizeof(int)*3, compressedBuffer, outputBytes);
+        exec_python();
 
-    std::cout << "log point 5 " << std::endl;
-   boost::asio::write(socket_, boost::asio::buffer(compressedBuffer, compressedLength));
-   std::cout << "log point 6 " << std::endl;
+        cv::Mat outputImage = cv::imread(outputPath);
+        type  = outputImage.type();
+        rows = outputImage.rows;
+        cols = outputImage.cols;
+
+        int outputBytes = outputImage.total() * outputImage.elemSize();
+        char* outputData = new char[outputBytes+sizeof(int)*3];
+        memcpy( (void*)outputData, &type, sizeof(int) );
+        memcpy( (void*)outputData + sizeof(int), &rows, sizeof(int) );
+        memcpy( (void*)outputData + sizeof(int)*2, &cols, sizeof(int) );
+        memcpy( (void*)outputData + sizeof(int)*3, outputImage.data, outputBytes );
+
+        uint8_t * compressedBuffer = new uint8_t[outputBytes];
+        int compressedLength = compressData(outputData, outputBytes+sizeof(int)*3, compressedBuffer, outputBytes);
+
+        write(socket, boost::asio::buffer(&compressedLength, sizeof(int)), boost::asio::transfer_all());
+        boost::asio::write(socket, boost::asio::buffer(compressedBuffer, compressedLength), boost::asio::transfer_all());
+    }
 }
 
 void exec_python()
